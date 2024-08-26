@@ -64,6 +64,11 @@ def basis(x, i, N, w):
 
 
 def quad_break(func: callable, a, b, points, **kwargs):
+    """
+    wrap the function `scipy.integrate.quad`
+    this makes the parameter 'points' avaliable when we use the paramter
+    'weight'
+    """
     points = np.sort(points)
     if len(points) == 0:
         return quad(func, a, b, **kwargs)
@@ -81,7 +86,33 @@ def quad_break(func: callable, a, b, points, **kwargs):
 
 
 class Potential1D:
-    def __init__(self, V: callable, N, w, points=[], verbose=1):
+
+    def __init__(self, V: callable, N, w, points=[], verbose=1, zero='mid'):
+        """
+        Numercically solve the bound state and the eigen wave functions for a
+        particle in a potential V.
+        The solutions are by diagonalized the Hamiltonian in the momentum
+        space, i.e. sin and cos basis.
+
+        V: potential function
+        N: the number of basis, must be an odd number.
+        w: the basis frequency.
+
+        For example, N = 5, w=0.1, then the basis will be:
+        sqrt(1/T), sqrt(2/T) cos(0.1x), sqrt(2/T) cos(0.2x),
+                   sqrt(2/T) sin(0.1x), sqrt(2/T) sin(0.2x), where T=2pi/w.
+
+        points: the points where the potential is not smooth. When calculate
+        the Fourier transform of the potential, we will separate the integral
+        region according these points.
+
+        verbose: ther verbose level. The greatter this value, the more
+        information will be printed.
+
+        zero: The default is 'mid', which means the potential is centered at
+        zero. If you set zero to 'left', the potential will be shifted, where
+        x=0 is the left of the potential.
+        """
         self.V = V
         self.N = N
         self.w = w
@@ -89,7 +120,16 @@ class Potential1D:
         self.points = points
         self.verbose = verbose
         self.NN = (N-1)/2  # number of the sin or cos
-        self.levels = 0
+        self.levels = 0  # the number of eigenvalues and eigenvectors desired.
+        if zero == 'mid':
+            self.a = -self.T/2
+            self.b = self.T/2
+        elif zero == 'left':
+            self.a = 0
+            self.b = self.T
+
+        # the default region when generate the wave function
+        self.xlist = np.linspace(self.a, self.b, 1000)
 
     def get_eigenvals(self, levels):
         if not hasattr(self, 'eigenvals') or self.levels != levels:
@@ -98,6 +138,10 @@ class Potential1D:
 
     @timer
     def _gen_eigenvals(self, levels):
+        """
+        levels: The number of eigenvalues and eigenvectors desired.
+        See: docs of scipy.sparse.linalg.eigs
+        """
         self.levels = levels
         self.get_H()
         if self.verbose > 0:
@@ -109,14 +153,19 @@ class Potential1D:
             print('=========== digonal the Hamiltonian FINISHED! =====')
         return self.eigenvals
 
-    def get_eigenwf(self, xs):
+    def get_eigenwf(self, xs=[]):
         if not hasattr(self, 'eigenwf'):
-            self._gen_eigenwf(xs)
+            if len(xs) == 0:
+                xs = np.copy(self.xlist)
+            self._gen_eigenwf(xs=xs)
         return self.eigenwf
 
     @timer
     def _gen_eigenwf(self, xs):
-        """get eigen wave function."""
+        """
+        get eigen wave function.
+        xs: the points where the wave function is calculated.
+        """
         self.xs = xs
         if not hasattr(self, 'eigenvals'):
             raise ValueError('call get_eigenvals first!')
@@ -225,11 +274,11 @@ class Potential1D:
             if self.verbose > 0:
                 print('=== calculating cos and sin ===', i, '===', end='\r')
             self.cos_list.append(quad_break(self.V,
-                                            -self.T/2, self.T/2,
+                                            self.a, self.b,
                                             points=self.points,
                                             weight='cos',
                                             wvar=i*self.w)[0])
-            self.sin_list.append(quad_break(self.V, -self.T/2, self.T/2,
+            self.sin_list.append(quad_break(self.V, self.a, self.b,
                                             points=self.points,
                                             weight='sin',
                                             wvar=i*self.w)[0])
